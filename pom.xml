@@ -52,6 +52,7 @@
                     <mainClass>com.makasprzak.matrix.Matrix</mainClass>
                     <arguments>
                         <argument>30</argument>
+                        <argument>15</argument>
                     </arguments>
                 </configuration>
             </plugin>
