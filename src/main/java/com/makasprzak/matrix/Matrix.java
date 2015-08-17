@@ -1,39 +1,44 @@
 package com.makasprzak.matrix;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
-import org.apache.commons.io.FileUtils;
-
 import javax.sound.sampled.*;
-import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Optional;
+import java.util.Scanner;
 
 import static com.makasprzak.matrix.Equation.Builder.equation;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.IntStream.range;
-import static org.apache.commons.io.FileUtils.listFiles;
-import static org.apache.commons.io.FileUtils.readFileToString;
 
 public class Matrix {
 
-    public static final Gson GSON = new Gson();
+    public final StatisticsRepository statisticsRepository = new StatisticsRepository();
 
     public static void main(String[] args) throws Exception {
+        new Matrix().run(args);
+
+    }
+
+    private void run(String[] args) throws Exception {
         if (args.length == 1 && args[0].equals("t")) {
-            Matrix matrix = new Matrix();
-            List<Equation> equations = matrix.buildEquations(2, 3);
-            matrix.execute(20_000,equations);
+            List<Equation> equations = buildEquations(2, 3);
+            execute(20_000,equations);
             return;
         }
         long timeLimit = Integer.parseInt(args[0]) * 1000;
-        Optional<File> mostRecentFile = listFiles(new File(System.getProperty("user.dir")), new String[]{"json"}, false).stream()
-                .sorted((left, right) -> right.compareTo(left))
-                .findFirst();
-        if (!(args.length > 1 && args[1].equals("n")) && mostRecentFile.isPresent()) {
-            executeForPreviousStats(mostRecentFile.get(), timeLimit, threshold(args));
+        Optional<List<Statistic>> statistics = statisticsRepository.findLatest();
+        if (!(args.length > 1 && args[1].equals("n")) && statistics.isPresent()) {
+            try {
+                List<Equation> equationList = statistics.get().stream()
+                        .filter(stat -> stat.getTimeTaken() > threshold(args))
+                        .map(Statistic::getEquation)
+                        .collect(toList());
+                new Matrix().execute(timeLimit, equationList);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         } else new Matrix().execute(timeLimit);
-
     }
 
     private static long threshold(String[] args) {
@@ -47,23 +52,6 @@ public class Matrix {
     }
 
 
-    private static void executeForPreviousStats(File file, long timeLimit, long threshold) {
-        try {
-            List<Equation> equationList = readStatistics(file).stream()
-                    .filter(stat -> stat.getTimeTaken() > threshold)
-                    .map(stat -> stat.getEquation())
-                    .collect(toList());
-            new Matrix().execute(timeLimit, equationList);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static List<Statistic> readStatistics(File file) throws IOException {
-        String json = readFileToString(file);
-        return GSON.fromJson(json, new TypeToken<List<Statistic>>() {
-        }.getType());
-    }
 
     private void execute(long timeLimit) throws Exception {
         execute(timeLimit, buildEquationList());
@@ -72,9 +60,10 @@ public class Matrix {
     private void execute(long timeLimit, List<Equation> equationList) throws Exception {
         EquationManager equations = EquationManager.create(equationList);
         performLearningSession(timeLimit, equations);
-        String serialized = GSON.toJson(equations.getStatistics());
-        FileUtils.writeStringToFile(new File(new Date().getTime()+".json"), serialized);
+        List<Statistic> statistics = equations.getStatistics();
+        statisticsRepository.save(statistics);
     }
+
 
     private void performLearningSession(long timeLimit, EquationManager equations) throws UnsupportedAudioFileException, IOException, LineUnavailableException {
         Scanner scanner = new Scanner(System.in);
@@ -98,13 +87,11 @@ public class Matrix {
                 System.out.println("Niestety wynik niepoprawny :(");
                 equations.addTimeSpent(equation,timeTaken);
                 play("/error.wav");
-                continue;
             } else {
                 if (timeout) {
                     System.out.println("Wynik dobry, ale niestety zajelo Ci to zbyt wiele czasu :(");
                     play("/faster.wav");
                     equations.addTimeSpent(equation,timeTaken);
-                    continue;
                 } else {
                     System.out.println("Dobrze!");
                     play("/yuppi.wav");
